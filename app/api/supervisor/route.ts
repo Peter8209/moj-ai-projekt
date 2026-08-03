@@ -39,8 +39,15 @@ const MAX_PARALLEL_REVISIONS = 2;
 
 const REVISED_TEXT_START = '<<<REVISED_TEXT>>>';
 const REVISED_TEXT_END = '<<<END_REVISED_TEXT>>>';
-const CHANGE_LOG_START = '<<<CHANGE_LOG>>>';
-const CHANGE_LOG_END = '<<<END_CHANGE_LOG>>>';
+const HIGHLIGHTED_TEXT_START = '<<<HIGHLIGHTED_TEXT>>>';
+const HIGHLIGHTED_TEXT_END = '<<<END_HIGHLIGHTED_TEXT>>>';
+const CHANGE_PROTOCOL_START = '<<<CHANGE_PROTOCOL>>>';
+const CHANGE_PROTOCOL_END = '<<<END_CHANGE_PROTOCOL>>>';
+
+// Stabilné značky používané medzi API a frontendom.
+// Frontend ich pri zobrazení a exporte prevedie na žlté zvýraznenie.
+const CHANGE_MARK_START = '[[[CHANGED_START]]]';
+const CHANGE_MARK_END = '[[[CHANGED_END]]]';
 
 type SavedProfile = {
   id?: string;
@@ -94,6 +101,13 @@ type ExtractedAttachment = {
   truncated: boolean;
   warning?: string;
   imageDataUrl?: string;
+
+  /**
+   * Pripomienky vložené priamo vo Word dokumente.
+   * Pri DOCX ide najmä o komentáre uložené vo word/comments.xml.
+   */
+  embeddedFeedback?: string;
+  embeddedFeedbackCount?: number;
 };
 
 type SupervisorRequestPayload = {
@@ -108,6 +122,10 @@ type SupervisorRequestPayload = {
   profile: SavedProfile | null;
   sourceFiles: File[];
   feedbackFiles: File[];
+
+  feedbackSourceMode: 'auto' | 'separate' | 'embedded' | 'both';
+  highlightChanges: boolean;
+  detailedChangeProtocol: boolean;
 };
 
 type RevisionChunk = {
@@ -119,7 +137,8 @@ type RevisionChunk = {
 
 type ChunkRevision = {
   revisedText: string;
-  changeLog: string;
+  highlightedText: string;
+  changeProtocol: string;
   retried: boolean;
   lengthRatio: number;
 };
@@ -128,7 +147,21 @@ type SupervisorResponse = {
   ok: boolean;
   revisedDocument?: string;
   rewrittenText?: string;
+
+  /**
+   * Kompletný dokument so značkami [[[CHANGED_START]]]...[[[CHANGED_END]]]
+   * okolo reálne doplneného alebo nahradeného textu.
+   */
+  highlightedDocument?: string;
+  highlightedText?: string;
+
+  /**
+   * Detailný protokol: miesto, presná pripomienka, text pred zmenou,
+   * text po zmene a spôsob zapracovania.
+   */
   changeLog?: string;
+  changeProtocol?: string;
+  detailedChangeProtocol?: string;
 
   // Kompatibilné aliasy pre existujúci frontend.
   output?: string;
@@ -145,6 +178,8 @@ type SupervisorResponse = {
     extractedCharacters: number;
     sourceFiles: number;
     feedbackFiles: number;
+    embeddedFeedbackCount?: number;
+    embeddedFeedbackCharacters?: number;
   };
   meta?: {
     model: string;
@@ -162,6 +197,10 @@ type SupervisorResponse = {
     retriedChunks: number;
     minimumRewriteRatio: number;
     changedChunks: number;
+    embeddedFeedbackCharacters: number;
+    embeddedFeedbackCount: number;
+    feedbackSourceMode: 'auto' | 'separate' | 'embedded' | 'both';
+    changeProtocolEntries: number;
   };
 };
 
@@ -278,6 +317,173 @@ async function extractDocxText(buffer: Buffer): Promise<string> {
   return cleanInvisibleCharacters(result?.value || '');
 }
 
+function decodeWordXmlText(value: string): string {
+  return cleanInvisibleCharacters(
+    String(value || '')
+      .replace(/<w:tab\b[^>]*\/>/gi, '\t')
+      .replace(/<w:br\b[^>]*\/>/gi, '\n')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&'),
+  );
+}
+
+async function readDocxXmlEntry(
+  buffer: Buffer,
+  entrySuffix: string,
+): Promise<string> {
+  try {
+    /**
+     * Projekt už používa balík xlsx. Jeho CFB vrstva dokáže prečítať
+     * aj ZIP kontajner OOXML, preto nemusíme pridávať ďalšiu závislosť
+     * iba kvôli Word komentárom.
+     */
+    const xlsxModule: any = await import('xlsx');
+    const xlsx = xlsxModule?.default || xlsxModule;
+    const cfb = xlsx?.CFB?.read?.(buffer, { type: 'buffer' });
+
+    const paths: string[] = Array.isArray(cfb?.FullPaths) ? cfb.FullPaths : [];
+    const files: any[] = Array.isArray(cfb?.FileIndex) ? cfb.FileIndex : [];
+
+    const normalizedSuffix = entrySuffix.replace(/^\/+/, '').toLowerCase();
+    const entryIndex = paths.findIndex((path) =>
+      String(path || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .toLowerCase()
+        .endsWith(normalizedSuffix),
+    );
+
+    if (entryIndex < 0) return '';
+
+    const content = files[entryIndex]?.content;
+    if (!content) return '';
+
+    return Buffer.isBuffer(content)
+      ? content.toString('utf-8')
+      : Buffer.from(content).toString('utf-8');
+  } catch {
+    // DOCX bez komentárov alebo verzia xlsx bez podpory daného ZIP kontajnera.
+    return '';
+  }
+}
+
+type WordCommentRecord = {
+  id: string;
+  author: string;
+  comment: string;
+  anchor: string;
+};
+
+async function extractDocxComments(
+  buffer: Buffer,
+): Promise<{ text: string; count: number }> {
+  const [commentsXml, documentXml] = await Promise.all([
+    readDocxXmlEntry(buffer, 'word/comments.xml'),
+    readDocxXmlEntry(buffer, 'word/document.xml'),
+  ]);
+
+  if (!commentsXml) return { text: '', count: 0 };
+
+  const comments = new Map<string, Omit<WordCommentRecord, 'anchor'>>();
+  const commentPattern = /<w:comment\b([^>]*)>([\s\S]*?)<\/w:comment>/gi;
+  let commentMatch: RegExpExecArray | null;
+
+  while ((commentMatch = commentPattern.exec(commentsXml))) {
+    const attributes = commentMatch[1] || '';
+    const body = commentMatch[2] || '';
+    const id =
+      attributes.match(/\bw:id="([^"]+)"/i)?.[1] ||
+      attributes.match(/\bid="([^"]+)"/i)?.[1] ||
+      '';
+    if (!id) continue;
+
+    const author =
+      attributes.match(/\bw:author="([^"]*)"/i)?.[1] ||
+      attributes.match(/\bauthor="([^"]*)"/i)?.[1] ||
+      'Neuvedený autor';
+
+    const textParts = Array.from(body.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi))
+      .map((match) => decodeWordXmlText(match[1] || ''))
+      .filter(Boolean);
+
+    const comment = cleanInvisibleCharacters(textParts.join(' '));
+    if (!comment) continue;
+
+    comments.set(id, {
+      id,
+      author: decodeWordXmlText(author),
+      comment,
+    });
+  }
+
+  if (!comments.size) return { text: '', count: 0 };
+
+  const anchors = new Map<string, string[]>();
+
+  if (documentXml) {
+    const activeCommentIds = new Set<string>();
+    const tokenPattern =
+      /<w:commentRangeStart\b[^>]*w:id="([^"]+)"[^>]*\/?>|<w:commentRangeEnd\b[^>]*w:id="([^"]+)"[^>]*\/?>|<w:t\b[^>]*>([\s\S]*?)<\/w:t>|<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>/gi;
+
+    let tokenMatch: RegExpExecArray | null;
+
+    while ((tokenMatch = tokenPattern.exec(documentXml))) {
+      const startId = tokenMatch[1];
+      const endId = tokenMatch[2];
+      const text = tokenMatch[3];
+
+      if (startId !== undefined) {
+        activeCommentIds.add(startId);
+        if (!anchors.has(startId)) anchors.set(startId, []);
+        continue;
+      }
+
+      if (endId !== undefined) {
+        activeCommentIds.delete(endId);
+        continue;
+      }
+
+      if (text !== undefined && activeCommentIds.size > 0) {
+        const decoded = decodeWordXmlText(text);
+        if (!decoded) continue;
+
+        for (const id of activeCommentIds) {
+          const values = anchors.get(id) || [];
+          values.push(decoded);
+          anchors.set(id, values);
+        }
+      }
+    }
+  }
+
+  const records: WordCommentRecord[] = Array.from(comments.values()).map(
+    (comment) => ({
+      ...comment,
+      anchor: cleanInvisibleCharacters((anchors.get(comment.id) || []).join(' ')),
+    }),
+  );
+
+  const formatted = records
+    .map((record, index) =>
+      [
+        `PRIPOMIENKA ${index + 1}`,
+        `Autor: ${record.author || 'Neuvedený autor'}`,
+        `Kotva v pôvodnej práci: ${record.anchor || 'Kotva sa z DOCX nedala určiť.'}`,
+        `Presné znenie pripomienky: ${record.comment}`,
+      ].join('\n'),
+    )
+    .join('\n\n---\n\n');
+
+  return {
+    text: cleanInvisibleCharacters(formatted),
+    count: records.length,
+  };
+}
+
 async function extractPdfText(buffer: Buffer): Promise<string> {
   const pdfParseModule: any = await import('pdf-parse');
   const parser =
@@ -378,6 +584,8 @@ async function extractUploadedFile(file: File): Promise<ExtractedAttachment> {
     }
 
     let extractedText = '';
+    let embeddedFeedback = '';
+    let embeddedFeedbackCount = 0;
 
     if (isTextLikeFile(name, type)) {
       const decoded = buffer.toString('utf-8');
@@ -387,7 +595,13 @@ async function extractUploadedFile(file: File): Promise<ExtractedAttachment> {
       extension === '.docx' ||
       type.includes('wordprocessingml.document')
     ) {
-      extractedText = await extractDocxText(buffer);
+      const [docxText, docxComments] = await Promise.all([
+        extractDocxText(buffer),
+        extractDocxComments(buffer),
+      ]);
+      extractedText = docxText;
+      embeddedFeedback = docxComments.text;
+      embeddedFeedbackCount = docxComments.count;
     } else if (extension === '.pdf' || type.includes('pdf')) {
       extractedText = await extractPdfText(buffer);
     } else if (
@@ -435,6 +649,8 @@ async function extractUploadedFile(file: File): Promise<ExtractedAttachment> {
       text: extractedText,
       extractionAvailable: true,
       truncated: false,
+      embeddedFeedback: embeddedFeedback || undefined,
+      embeddedFeedbackCount: embeddedFeedbackCount || undefined,
       warning:
         size > LARGE_FILE_LIMIT_BYTES
           ? `Súbor ${name} je veľký; server ho prečítal celý, ale spracovanie môže trvať dlhšie.`
@@ -470,6 +686,28 @@ function getStringFromJson(json: Record<string, unknown>, names: string[]): stri
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return '';
+}
+
+function parseBooleanFlag(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'ano', 'áno'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'nie'].includes(normalized)) return false;
+  return fallback;
+}
+
+function normalizeFeedbackSourceMode(
+  value: unknown,
+): 'auto' | 'separate' | 'embedded' | 'both' {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (
+    normalized === 'separate' ||
+    normalized === 'embedded' ||
+    normalized === 'both'
+  ) {
+    return normalized;
+  }
+  return 'auto';
 }
 
 function normalizeProfile(value: unknown): SavedProfile | null {
@@ -564,6 +802,14 @@ async function parseRequest(request: NextRequest): Promise<SupervisorRequestPayl
       feedbackFiles: explicitFeedbackFiles.length
         ? explicitFeedbackFiles
         : legacyFeedbackFiles,
+      feedbackSourceMode: normalizeFeedbackSourceMode(
+        formData.get('feedbackSourceMode') || formData.get('feedbackMode'),
+      ),
+      highlightChanges: parseBooleanFlag(formData.get('highlightChanges'), true),
+      detailedChangeProtocol: parseBooleanFlag(
+        formData.get('detailedChangeProtocol'),
+        true,
+      ),
     };
   }
 
@@ -603,6 +849,11 @@ async function parseRequest(request: NextRequest): Promise<SupervisorRequestPayl
     profile: normalizeProfile(json.profile || json.activeProfile || json.profileSnapshot),
     sourceFiles: [],
     feedbackFiles: [],
+    feedbackSourceMode: normalizeFeedbackSourceMode(
+      json.feedbackSourceMode || json.feedbackMode,
+    ),
+    highlightChanges: parseBooleanFlag(json.highlightChanges, true),
+    detailedChangeProtocol: parseBooleanFlag(json.detailedChangeProtocol, true),
   };
 }
 
@@ -855,10 +1106,20 @@ function splitIntoRevisionChunks(text: string): RevisionChunk[] {
 function buildSystemPrompt(params: {
   outputLanguage: string;
   citationStyle: string;
+  feedbackSourceMode: 'auto' | 'separate' | 'embedded' | 'both';
 }): string {
   return `
 Si AI školiteľ platformy Zedpera v režime PRESNÁ REVÍZIA PODĽA PRIPOMIENOK.
 Si akademický editor dokumentu. Tvojou úlohou NIE JE sumarizovať, hodnotiť ani vysvetľovať prácu, ale FYZICKY ZAPRACOVAŤ pripomienky do pôvodného textu.
+
+ZDROJE PRIPOMIENOK:
+- samostatný text z poľa pripomienok,
+- samostatný PDF/DOCX/TXT dokument s pripomienkami,
+- Word komentáre extrahované priamo z pôvodného DOCX,
+- poznámky vložené priamo v texte práce, napríklad „Pripomienka:“, „Komentár:“, „TODO:“, „Poznámka konzultanta:“ alebo podobné redakčné značky.
+- Režim zdroja pripomienok: ${params.feedbackSourceMode}.
+- Ak je pripomienka vložená priamo v práci, po jej zapracovaní odstráň z finálneho dokumentu samotnú redakčnú poznámku. Jej presné znenie však zachovaj v protokole zmien.
+- Bežný odborný text, ktorý iba používa slovo „komentár“ alebo „poznámka“, nepovažuj automaticky za pripomienku. Musí ísť o jednoznačnú redakčnú alebo konzultačnú inštrukciu.
 
 ZÁKLADNÝ PRINCÍP:
 Pripomienka je špecifikácia zmeny. Najprv urč, čo presne požaduje, potom nájdi miesto v aktuálnom úseku a vykonaj konkrétnu editáciu priamo v texte.
@@ -886,19 +1147,46 @@ ABSOLÚTNE PRAVIDLÁ:
 - Existujúce citácie zachovaj. Citačný štýl: ${params.citationStyle}.
 - Jazyk výsledku: ${params.outputLanguage}.
 
+ZVÝRAZNENÁ VERZIA:
+- HIGHLIGHTED_TEXT musí obsahovať celý výsledný úsek, nie iba zoznam zmien.
+- Každý nový alebo nahradený text obaľ presne značkami:
+  ${CHANGE_MARK_START}nové alebo upravené znenie${CHANGE_MARK_END}
+- Nezmenený text nesmie byť označený.
+- Pri čisto odstránenom texte nie je čo zvýrazniť; odstránené znenie uveď presne v protokole.
+- Nepoužívaj HTML, Markdown zvýraznenie, farby ani iné značky.
+- Po odstránení značiek musí byť HIGHLIGHTED_TEXT obsahovo totožný s REVISED_TEXT.
+
+DETAILNÝ PROTOKOL:
+Pre každú skutočne vykonanú zmenu vytvor samostatný blok v tomto presnom poradí:
+ZMENA_ID: poradové číslo v aktuálnom úseku
+MIESTO: kapitola, podkapitola, odsek, veta, tabuľka alebo najpresnejšia dostupná kotva
+PÔVODNÁ_PRIPOMIENKA: presné znenie pripomienky pred zapracovaním; nič neprikrášľuj ani nepreformuluj
+PÔVODNÉ_ZNENIE: presný pôvodný text z práce pred úpravou; pri doplnení uveď text bezprostredne pred miestom vloženia
+NOVÉ_ZNENIE: presný výsledný text po úprave
+SPÔSOB_ZAPRACOVANIA: stručne a vecne, čo sa vykonalo
+STAV: ZAPRACOVANÉ | ČIASTOČNE_ZAPRACOVANÉ | NEZAPRACOVANÉ_CHÝBAJÚCI_ÚDAJ
+---
+Ak sa nič nemenilo, vráť iba:
+BEZ_ZMENY – žiadna pripomienka sa na tento úsek nevzťahuje.
+
 KONTROLA PRED ODOVZDANÍM:
 1. Skontroluj každú pripomienku, ktorá sa vzťahuje na aktuálny úsek.
 2. Over, že výsledok obsahuje skutočnú úpravu textu, nie iba opis odporúčania.
 3. Over, že neboli stratené nesúvisiace odseky, fakty, čísla ani citácie.
-4. Ak sa na aktuálny úsek nevzťahuje žiadna pripomienka, vráť pôvodný úsek BEZ PREPISOVANIA a do protokolu uveď „BEZ_ZMENY – žiadna pripomienka sa na tento úsek nevzťahuje.“
+4. Over, že každá zmena je zvýraznená iba v HIGHLIGHTED_TEXT.
+5. Over, že protokol obsahuje presnú pripomienku a presné znenie pred aj po zmene.
+6. Ak sa na aktuálny úsek nevzťahuje žiadna pripomienka, vráť pôvodný úsek BEZ PREPISOVANIA.
 
-VÝSTUP MÁ VŽDY DVE ČASTI V PRESNOM FORMÁTE:
+VÝSTUP MÁ VŽDY TRI ČASTI V PRESNOM FORMÁTE:
 ${REVISED_TEXT_START}
-kompletný výsledný text aktuálneho úseku po priamom zapracovaní pripomienok
+kompletný čistý výsledný text aktuálneho úseku po priamom zapracovaní pripomienok
 ${REVISED_TEXT_END}
-${CHANGE_LOG_START}
-iba reálne vykonané zmeny; každý bod: miesto/sekcia – pripomienka – konkrétne vykonaná úprava
-${CHANGE_LOG_END}
+${HIGHLIGHTED_TEXT_START}
+ten istý kompletný výsledný text, ale nový alebo nahradený text označ značkami ${CHANGE_MARK_START} a ${CHANGE_MARK_END}
+${HIGHLIGHTED_TEXT_END}
+${CHANGE_PROTOCOL_START}
+detailný protokol podľa povinných polí vyššie
+${CHANGE_PROTOCOL_END}
 `.trim();
 }
 
@@ -907,15 +1195,23 @@ function buildChunkUserPrompt(params: {
   chunkCount: number;
   feedback: string;
   profileBlock: string;
+  feedbackSourceMode: 'auto' | 'separate' | 'embedded' | 'both';
   strictRetry: boolean;
 }): string {
   const feedbackInstruction = params.feedback
     ? params.feedback
-    : '[Neboli dodané žiadne pripomienky. Vráť AKTUÁLNY ÚSEK presne bez obsahovej ani štylistickej zmeny.]';
+    : [
+        '[Samostatné pripomienky neboli dodané.]',
+        'Skontroluj CURRENT_CHUNK, či obsahuje jednoznačné vložené pripomienky, komentáre konzultanta, redakčné poznámky alebo TODO pokyny.',
+        'Ak takéto pripomienky neobsahuje, vráť úsek presne bez zmeny.',
+      ].join(' ');
 
   return `
 ÚLOHA:
 Toto je úsek ${params.chunk.index + 1} z ${params.chunkCount}. Urob chirurgickú revíziu podľa pripomienok.
+
+REŽIM ZDROJA PRIPOMIENOK:
+${params.feedbackSourceMode}
 
 DÔLEŽITÉ:
 - Najprv si interne spáruj každú relevantnú pripomienku s konkrétnym miestom v CURRENT_CHUNK.
@@ -923,11 +1219,14 @@ DÔLEŽITÉ:
 - Nevracaj vysvetlenie toho, čo by sa malo urobiť. V REVISED_TEXT musí byť už hotová opravená verzia dokumentu.
 - Čokoľvek mimo rozsahu pripomienok zachovaj čo najpresnejšie podľa originálu.
 - Ak sa pripomienka na CURRENT_CHUNK nevzťahuje, CURRENT_CHUNK neparafrázuj.
+- Ak je pripomienka napísaná priamo v CURRENT_CHUNK, po zapracovaní odstráň jej redakčné označenie z finálneho textu.
+- V HIGHLIGHTED_TEXT označ iba reálne pridaný alebo nahradený text.
+- V CHANGE_PROTOCOL skopíruj presné znenie pripomienky, presný pôvodný úryvok a presný nový úryvok.
 
 AKTÍVNY PROFIL PRÁCE:
 ${params.profileBlock}
 
-PRIPOMIENKY ŠKOLITEĽA / OPONENTA / KONZULTANTA:
+SAMOSTATNÉ A EXTRAHOVANÉ PRIPOMIENKY ŠKOLITEĽA / OPONENTA / KONZULTANTA:
 <<<FEEDBACK>>>
 ${feedbackInstruction}
 <<<END_FEEDBACK>>>
@@ -950,11 +1249,11 @@ ${params.chunk.nextContext || '[Koniec dokumentu]'}
 ${
   params.strictRetry
     ? `KRITICKÁ OPRAVA PREDCHÁDZAJÚCEHO POKUSU:
-Predchádzajúca odpoveď nebola prijateľná. Nesmieš sumarizovať ani len opísať pripomienky. Zachovaj celý CURRENT_CHUNK a každú relevantnú pripomienku aplikuj priamo do konkrétnej vety, odseku, tabuľky alebo sekcie. Nesúvisiaci text nechaj nedotknutý.`
+Predchádzajúca odpoveď nebola prijateľná. Nesmieš sumarizovať ani len opísať pripomienky. Zachovaj celý CURRENT_CHUNK a každú relevantnú pripomienku aplikuj priamo do konkrétnej vety, odseku, tabuľky alebo sekcie. Nesúvisiaci text nechaj nedotknutý. Musíš vrátiť všetky tri časti: čistý dokument, zvýraznený dokument a detailný protokol pred/po.`
     : ''
 }
 
-Vráť iba presný formát REVISED_TEXT + CHANGE_LOG definovaný systémovou inštrukciou.
+Vráť iba presný formát REVISED_TEXT + HIGHLIGHTED_TEXT + CHANGE_PROTOCOL definovaný systémovou inštrukciou.
 `.trim();
 }
 
@@ -967,23 +1266,72 @@ function extractBetween(value: string, start: string, end: string): string {
   return value.slice(contentStart, endIndex).trim();
 }
 
-function parseChunkOutput(raw: string): { revisedText: string; changeLog: string } {
+function stripChangeMarkers(value: string): string {
+  return cleanInvisibleCharacters(
+    String(value || '')
+      .split(CHANGE_MARK_START)
+      .join('')
+      .split(CHANGE_MARK_END)
+      .join(''),
+  );
+}
+
+function normalizeHighlightedChunk(
+  revisedText: string,
+  highlightedText: string,
+): string {
+  const cleanHighlighted = cleanInvisibleCharacters(highlightedText);
+  if (!cleanHighlighted) return revisedText;
+
+  const withoutMarkers = stripChangeMarkers(cleanHighlighted);
+  if (normalizeForComparison(withoutMarkers) !== normalizeForComparison(revisedText)) {
+    // Bezpečnostný fallback: zvýraznená verzia nesmie obsahovo meniť dokument.
+    return revisedText;
+  }
+
+  return cleanHighlighted;
+}
+
+function parseChunkOutput(raw: string): {
+  revisedText: string;
+  highlightedText: string;
+  changeProtocol: string;
+} {
   const cleaned = cleanEditorOutput(raw);
   const hasRevisedStart = cleaned.includes(REVISED_TEXT_START);
   const hasRevisedEnd = cleaned.includes(REVISED_TEXT_END);
-  const hasLogStart = cleaned.includes(CHANGE_LOG_START);
-  const hasLogEnd = cleaned.includes(CHANGE_LOG_END);
+  const hasHighlightedStart = cleaned.includes(HIGHLIGHTED_TEXT_START);
+  const hasHighlightedEnd = cleaned.includes(HIGHLIGHTED_TEXT_END);
+  const hasProtocolStart = cleaned.includes(CHANGE_PROTOCOL_START);
+  const hasProtocolEnd = cleaned.includes(CHANGE_PROTOCOL_END);
 
-  if (!hasRevisedStart || !hasRevisedEnd || !hasLogStart || !hasLogEnd) {
-    return { revisedText: '', changeLog: '' };
+  if (
+    !hasRevisedStart ||
+    !hasRevisedEnd ||
+    !hasHighlightedStart ||
+    !hasHighlightedEnd ||
+    !hasProtocolStart ||
+    !hasProtocolEnd
+  ) {
+    return {
+      revisedText: '',
+      highlightedText: '',
+      changeProtocol: '',
+    };
   }
 
+  const revisedText = cleanEditorOutput(
+    extractBetween(cleaned, REVISED_TEXT_START, REVISED_TEXT_END),
+  );
+  const highlightedText = cleanInvisibleCharacters(
+    extractBetween(cleaned, HIGHLIGHTED_TEXT_START, HIGHLIGHTED_TEXT_END),
+  );
+
   return {
-    revisedText: cleanEditorOutput(
-      extractBetween(cleaned, REVISED_TEXT_START, REVISED_TEXT_END),
-    ),
-    changeLog: cleanInvisibleCharacters(
-      extractBetween(cleaned, CHANGE_LOG_START, CHANGE_LOG_END),
+    revisedText,
+    highlightedText: normalizeHighlightedChunk(revisedText, highlightedText),
+    changeProtocol: cleanInvisibleCharacters(
+      extractBetween(cleaned, CHANGE_PROTOCOL_START, CHANGE_PROTOCOL_END),
     ),
   };
 }
@@ -1088,6 +1436,7 @@ async function reviseOneChunk(params: {
   profileBlock: string;
   systemPrompt: string;
   imageParts: any[];
+  feedbackSourceMode: 'auto' | 'separate' | 'embedded' | 'both';
 }): Promise<ChunkRevision> {
   const run = async (strictRetry: boolean) => {
     const generated = await generateChunkRevision({
@@ -1097,6 +1446,7 @@ async function reviseOneChunk(params: {
         chunkCount: params.chunkCount,
         feedback: params.feedback,
         profileBlock: params.profileBlock,
+        feedbackSourceMode: params.feedbackSourceMode,
         strictRetry,
       }),
       imageParts: params.imageParts,
@@ -1117,6 +1467,8 @@ async function reviseOneChunk(params: {
 
   const needsRetry =
     !attempt.revisedText ||
+    !attempt.highlightedText ||
+    !attempt.changeProtocol ||
     attempt.finishReason === 'length' ||
     looksLikeAuditOutput(attempt.revisedText) ||
     (params.chunk.text.length > 4_000 &&
@@ -1167,7 +1519,11 @@ async function reviseOneChunk(params: {
 
   return {
     revisedText: attempt.revisedText,
-    changeLog: attempt.changeLog,
+    highlightedText: normalizeHighlightedChunk(
+      attempt.revisedText,
+      attempt.highlightedText,
+    ),
+    changeProtocol: attempt.changeProtocol,
     retried,
     lengthRatio: attempt.ratio,
   };
@@ -1197,36 +1553,48 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function normalizeChangeLog(revisions: ChunkRevision[]): string {
+function normalizeChangeProtocol(revisions: ChunkRevision[]): string {
+  const sections: string[] = [];
   const seen = new Set<string>();
-  const lines: string[] = [];
 
   revisions.forEach((revision, index) => {
-    const rawLines = revision.changeLog
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .filter((line) => !/^change\s*log\s*:?$/i.test(line));
+    const protocol = cleanInvisibleCharacters(revision.changeProtocol);
+    if (!protocol || /^BEZ_ZMENY\b/i.test(protocol)) return;
 
-    if (!rawLines.length) return;
+    const normalizedKey = protocol.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (seen.has(normalizedKey)) return;
+    seen.add(normalizedKey);
 
-    for (const rawLine of rawLines) {
-      const line = rawLine.replace(/^[-•*]\s*/, '').trim();
-      if (!line) continue;
-      const key = line.toLowerCase().replace(/\s+/g, ' ');
-      if (seen.has(key)) continue;
-      seen.add(key);
-      lines.push(`- ${line}`);
-    }
-
-    if (index < revisions.length - 1 && lines.length && lines[lines.length - 1] !== '') {
-      // Žiadny technický nadpis medzi chunkmi; iba zachovanie čitateľnosti.
-    }
+    sections.push(
+      [
+        `ÚSEK DOKUMENTU: ${index + 1}`,
+        protocol.replace(/\n-{3,}\s*$/g, '').trim(),
+      ].join('\n'),
+    );
   });
 
-  return lines.length
-    ? lines.join('\n')
-    : '- Dokument bol revidovaný podľa dodaných pripomienok; model nevrátil samostatné položky protokolu zmien.';
+  if (!sections.length) {
+    return [
+      'PROTOKOL ZAPRACOVANIA PRIPOMIENOK',
+      '',
+      'Nebola vykonaná žiadna textová zmena. Buď neboli dodané pripomienky, alebo sa dodané pripomienky nevzťahovali na spracovaný dokument.',
+    ].join('\n');
+  }
+
+  return [
+    'PROTOKOL ZAPRACOVANIA PRIPOMIENOK',
+    '',
+    'Každá položka obsahuje presné znenie pripomienky, pôvodný text a výsledný text po zapracovaní.',
+    '',
+    sections.join('\n\n============================================================\n\n'),
+  ].join('\n');
+}
+
+function countChangeProtocolEntries(value: string): number {
+  const explicitEntries = value.match(/^ZMENA_ID\s*:/gim)?.length || 0;
+  if (explicitEntries > 0) return explicitEntries;
+
+  return value.match(/^PÔVODNÁ_PRIPOMIENKA\s*:/gim)?.length || 0;
 }
 
 function appendWarnings(attachments: ExtractedAttachment[]): string | undefined {
@@ -1348,6 +1716,14 @@ export async function POST(request: NextRequest) {
       'Pripomienkové dokumenty',
     );
 
+    const embeddedFeedback = joinDistinctText(
+      sourceAttachments.map((attachment) => attachment.embeddedFeedback || ''),
+    );
+    const embeddedFeedbackCount = sourceAttachments.reduce(
+      (sum, attachment) => sum + (attachment.embeddedFeedbackCount || 0),
+      0,
+    );
+
     const sourceDocument = joinDistinctText([
       studentText,
       sourceAttachmentBlock.text,
@@ -1356,6 +1732,7 @@ export async function POST(request: NextRequest) {
     const feedback = joinDistinctText([
       typedFeedback,
       feedbackAttachmentBlock.text,
+      embeddedFeedback,
     ]);
 
     const allAttachments = [...sourceAttachments, ...feedbackAttachments];
@@ -1378,7 +1755,11 @@ export async function POST(request: NextRequest) {
     const outputLanguage = normalizeLanguage(payload.workLanguage, payload.profile);
     const citationStyle = normalizeCitationStyle(payload.citationStyle, payload.profile);
     const profileBlock = buildProfileBlock(payload.profile);
-    const systemPrompt = buildSystemPrompt({ outputLanguage, citationStyle });
+    const systemPrompt = buildSystemPrompt({
+      outputLanguage,
+      citationStyle,
+      feedbackSourceMode: payload.feedbackSourceMode,
+    });
 
     let revisions: ChunkRevision[] = [];
     let revisionChunks: RevisionChunk[] = [];
@@ -1401,6 +1782,7 @@ export async function POST(request: NextRequest) {
             profileBlock,
             systemPrompt,
             imageParts,
+            feedbackSourceMode: payload.feedbackSourceMode,
           }),
       );
     } else {
@@ -1419,6 +1801,7 @@ export async function POST(request: NextRequest) {
           profileBlock,
           systemPrompt,
           imageParts,
+          feedbackSourceMode: payload.feedbackSourceMode,
         }),
       ];
     }
@@ -1426,7 +1809,11 @@ export async function POST(request: NextRequest) {
     const revisedDocument = cleanEditorOutput(
       revisions.map((revision) => revision.revisedText).join('\n\n'),
     );
-    const changeLog = normalizeChangeLog(revisions);
+    const highlightedDocument = cleanInvisibleCharacters(
+      revisions.map((revision) => revision.highlightedText).join('\n\n'),
+    );
+    const changeProtocol = normalizeChangeProtocol(revisions);
+    const changeProtocolEntries = countChangeProtocolEntries(changeProtocol);
     const changedChunks = revisionChunks.length
       ? revisions.filter((revision, index) =>
           hasMaterialTextChange(revisionChunks[index]?.text || '', revision.revisedText),
@@ -1464,7 +1851,11 @@ export async function POST(request: NextRequest) {
       ok: true,
       revisedDocument,
       rewrittenText: revisedDocument,
-      changeLog,
+      highlightedDocument,
+      highlightedText: highlightedDocument,
+      changeLog: changeProtocol,
+      changeProtocol,
+      detailedChangeProtocol: changeProtocol,
       output: revisedDocument,
       result: revisedDocument,
       message: revisedDocument,
@@ -1477,6 +1868,8 @@ export async function POST(request: NextRequest) {
         extractedCharacters,
         sourceFiles: payload.sourceFiles.length,
         feedbackFiles: payload.feedbackFiles.length,
+        embeddedFeedbackCount,
+        embeddedFeedbackCharacters: embeddedFeedback.length,
       },
       meta: {
         model: MODEL,
@@ -1494,6 +1887,10 @@ export async function POST(request: NextRequest) {
         retriedChunks,
         minimumRewriteRatio,
         changedChunks,
+        embeddedFeedbackCharacters: embeddedFeedback.length,
+        embeddedFeedbackCount,
+        feedbackSourceMode: payload.feedbackSourceMode,
+        changeProtocolEntries,
       },
     });
   } catch (error) {

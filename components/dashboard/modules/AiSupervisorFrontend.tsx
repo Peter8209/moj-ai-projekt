@@ -1091,7 +1091,7 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
       placeholder:
         "Vložte pôvodný text práce alebo kapitoly. Ak nahrávate celý dokument ako prílohu, toto pole môže zostať prázdne.",
       intro:
-        "AI školiteľ cielene zapracuje pripomienky do pôvodného dokumentu bez jeho skracovania na súhrn. Zachová štruktúru, terminológiu, citácie a nezmenené časti práce.",
+        "AI školiteľ zapracuje pripomienky zo samostatného dokumentu aj z komentárov priamo v práci. Vráti čistú revidovanú verziu, verziu so zvýraznenými zmenami a detailný protokol pred/po.",
       resultTitle: "Kompletný revidovaný dokument",
     },
     quality: {
@@ -1696,11 +1696,19 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
 };
 
 
+type SupervisorCanvasMode = "document" | "highlighted" | "changes";
+type SupervisorFeedbackSourceMode = "auto" | "separate" | "embedded" | "both";
+
 type SupervisorEditorCopy = {
   feedbackLabel: string;
   feedbackPlaceholder: string;
   feedbackHelp: string;
   optionalLabel: string;
+  feedbackSourceLabel: string;
+  feedbackSourceHelp: string;
+  feedbackSourceOptions: Record<SupervisorFeedbackSourceMode, string>;
+  highlightedResultLabel: string;
+  protocolResultLabel: string;
   workflowEyebrow: string;
   workflowTitle: string;
   workflowDescription: string;
@@ -1715,14 +1723,25 @@ const SUPERVISOR_EDITOR_COPY: Record<LanguageCode, SupervisorEditorCopy> = {
     feedbackHelp:
       "Pripomienky môžete vložiť ako text alebo nahrať ako samostatný PDF/DOCX súbor. AI ich zapracuje priamo do príslušných miest práce.",
     optionalLabel: "Text alebo dokument",
+    feedbackSourceLabel: "Kde sa nachádzajú pripomienky",
+    feedbackSourceHelp:
+      "Automatický režim spracuje samostatné pripomienky aj komentáre alebo poznámky vložené priamo v pôvodnej práci.",
+    feedbackSourceOptions: {
+      auto: "Automaticky – samostatne aj priamo v práci",
+      separate: "Iba samostatný text alebo dokument",
+      embedded: "Iba pripomienky priamo v práci",
+      both: "Oba zdroje súčasne",
+    },
+    highlightedResultLabel: "Dokument so zvýraznenými zmenami",
+    protocolResultLabel: "Detailný protokol pred/po",
     workflowEyebrow: "Revision Mode",
     workflowTitle: "Kompletná revízia práce podľa pripomienok",
     workflowDescription:
-      "AI školiteľ nesumarizuje prácu. Zachová pôvodnú štruktúru a obsah, upraví iba relevantné miesta a vytvorí aj samostatný protokol vykonaných zmien.",
+      "AI školiteľ zachová celý dokument, fyzicky zapracuje pripomienky, zvýrazní každé upravené miesto a vytvorí samostatný protokol s presným znením pripomienky, pôvodným textom a textom po zmene.",
     workflowSteps: [
       "Vložiť alebo nahrať pôvodnú prácu",
       "Pridať text alebo dokument s pripomienkami",
-      "Získať revidovanú prácu aj protokol zmien",
+      "Získať čistú prácu, zvýraznené zmeny a protokol pred/po",
     ],
   },
   cs: {
@@ -1732,6 +1751,17 @@ const SUPERVISOR_EDITOR_COPY: Record<LanguageCode, SupervisorEditorCopy> = {
     feedbackHelp:
       "Připomínky se nevrátí jako posudek. AI Konzultant je přímo zapracuje do výsledného textu.",
     optionalLabel: "Volitelné",
+    feedbackSourceLabel: "Kde se nacházejí připomínky",
+    feedbackSourceHelp:
+      "Automatický režim zpracuje samostatné připomínky i komentáře nebo poznámky vložené přímo v původní práci.",
+    feedbackSourceOptions: {
+      auto: "Automaticky – samostatně i přímo v práci",
+      separate: "Pouze samostatný text nebo dokument",
+      embedded: "Pouze připomínky přímo v práci",
+      both: "Oba zdroje současně",
+    },
+    highlightedResultLabel: "Dokument se zvýrazněnými změnami",
+    protocolResultLabel: "Podrobný protokol před/po",
     workflowEyebrow: "Editor Mode",
     workflowTitle: "Od draftu k hotovému akademickému textu",
     workflowDescription:
@@ -1749,6 +1779,17 @@ const SUPERVISOR_EDITOR_COPY: Record<LanguageCode, SupervisorEditorCopy> = {
     feedbackHelp:
       "The feedback is not returned as a review. AI Consultant applies it directly to the rewritten text.",
     optionalLabel: "Optional",
+    feedbackSourceLabel: "Where the feedback is located",
+    feedbackSourceHelp:
+      "Automatic mode processes separate feedback files and comments or notes embedded directly in the original document.",
+    feedbackSourceOptions: {
+      auto: "Automatic – separate and embedded",
+      separate: "Separate text or document only",
+      embedded: "Feedback embedded in the work only",
+      both: "Use both sources",
+    },
+    highlightedResultLabel: "Document with highlighted changes",
+    protocolResultLabel: "Detailed before/after protocol",
     workflowEyebrow: "Editor Mode",
     workflowTitle: "From rough draft to final academic text",
     workflowDescription:
@@ -1766,6 +1807,17 @@ const SUPERVISOR_EDITOR_COPY: Record<LanguageCode, SupervisorEditorCopy> = {
     feedbackHelp:
       "Die Hinweise werden nicht als Gutachten ausgegeben. Der KI-Berater arbeitet sie direkt in den fertigen Text ein.",
     optionalLabel: "Optional",
+    feedbackSourceLabel: "Wo sich die Hinweise befinden",
+    feedbackSourceHelp:
+      "Der automatische Modus verarbeitet separate Hinweise sowie Kommentare oder Notizen direkt im ursprünglichen Dokument.",
+    feedbackSourceOptions: {
+      auto: "Automatisch – separat und im Dokument",
+      separate: "Nur separater Text oder separates Dokument",
+      embedded: "Nur Hinweise direkt im Dokument",
+      both: "Beide Quellen verwenden",
+    },
+    highlightedResultLabel: "Dokument mit hervorgehobenen Änderungen",
+    protocolResultLabel: "Detailliertes Vorher-/Nachher-Protokoll",
     workflowEyebrow: "Editor Mode",
     workflowTitle: "Vom Rohentwurf zum fertigen akademischen Text",
     workflowDescription:
@@ -1783,6 +1835,17 @@ const SUPERVISOR_EDITOR_COPY: Record<LanguageCode, SupervisorEditorCopy> = {
     feedbackHelp:
       "Uwagi nie zostaną zwrócone jako recenzja. Konsultant AI bezpośrednio wprowadzi je do poprawionego tekstu.",
     optionalLabel: "Opcjonalne",
+    feedbackSourceLabel: "Gdzie znajdują się uwagi",
+    feedbackSourceHelp:
+      "Tryb automatyczny przetwarza osobne uwagi oraz komentarze lub notatki umieszczone bezpośrednio w oryginalnej pracy.",
+    feedbackSourceOptions: {
+      auto: "Automatycznie – osobno i w pracy",
+      separate: "Tylko osobny tekst lub dokument",
+      embedded: "Tylko uwagi bezpośrednio w pracy",
+      both: "Użyj obu źródeł",
+    },
+    highlightedResultLabel: "Dokument z wyróżnionymi zmianami",
+    protocolResultLabel: "Szczegółowy protokół przed/po",
     workflowEyebrow: "Editor Mode",
     workflowTitle: "Od szkicu do gotowego tekstu akademickiego",
     workflowDescription:
@@ -1800,6 +1863,17 @@ const SUPERVISOR_EDITOR_COPY: Record<LanguageCode, SupervisorEditorCopy> = {
     feedbackHelp:
       "A megjegyzések nem bírálatként jelennek meg. Az AI konzulens közvetlenül beépíti őket az átdolgozott szövegbe.",
     optionalLabel: "Opcionális",
+    feedbackSourceLabel: "Hol találhatók a megjegyzések",
+    feedbackSourceHelp:
+      "Az automatikus mód feldolgozza a külön megadott megjegyzéseket és az eredeti dokumentumba beillesztett kommenteket vagy jegyzeteket is.",
+    feedbackSourceOptions: {
+      auto: "Automatikusan – külön és a dokumentumban",
+      separate: "Csak külön szöveg vagy dokumentum",
+      embedded: "Csak a dolgozatba ágyazott megjegyzések",
+      both: "Mindkét forrás használata",
+    },
+    highlightedResultLabel: "Dokumentum kiemelt módosításokkal",
+    protocolResultLabel: "Részletes előtte/utána jegyzőkönyv",
     workflowEyebrow: "Editor Mode",
     workflowTitle: "A nyers vázlattól a kész akadémiai szövegig",
     workflowDescription:
@@ -3163,14 +3237,56 @@ function htmlEscape(value: string) {
     .replaceAll("'", "&#039;");
 }
 
-function createDocHtml(title: string, text: string) {
-  const paragraphs = cleanFinalOutput(text)
-    .split("\n")
-    .map((line) => {
-      if (!line.trim()) return "<p>&nbsp;</p>";
-      return `<p>${htmlEscape(line)}</p>`;
+const CHANGE_MARK_START = "[[[CHANGED_START]]]";
+const CHANGE_MARK_END = "[[[CHANGED_END]]]";
+
+function stripChangeMarkers(value: string): string {
+  return String(value || "")
+    .split(CHANGE_MARK_START)
+    .join("")
+    .split(CHANGE_MARK_END)
+    .join("");
+}
+
+function highlightedLineToHtml(line: string): string {
+  if (!line.trim()) return "<p>&nbsp;</p>";
+
+  const parts = String(line).split(
+    /(\[\[\[CHANGED_START\]\]\]|\[\[\[CHANGED_END\]\]\])/g,
+  );
+  let highlighted = false;
+
+  const content = parts
+    .map((part) => {
+      if (part === CHANGE_MARK_START) {
+        highlighted = true;
+        return "";
+      }
+
+      if (part === CHANGE_MARK_END) {
+        highlighted = false;
+        return "";
+      }
+
+      const escaped = htmlEscape(part);
+      return highlighted
+        ? `<mark class="zedpera-change">${escaped}</mark>`
+        : escaped;
     })
     .join("");
+
+  return `<p>${content}</p>`;
+}
+
+function createHighlightedBodyHtml(text: string): string {
+  return cleanFinalOutput(text)
+    .split("\n")
+    .map(highlightedLineToHtml)
+    .join("");
+}
+
+function createDocHtml(title: string, text: string) {
+  const paragraphs = createHighlightedBodyHtml(text);
 
   return `
 <!doctype html>
@@ -3192,6 +3308,11 @@ function createDocHtml(title: string, text: string) {
     }
     p {
       margin: 0 0 11px 0;
+    }
+    mark.zedpera-change {
+      background: #fff59d;
+      color: #111827;
+      padding: 0 2px;
     }
   </style>
 </head>
@@ -4140,8 +4261,12 @@ export default function AiSupervisorFrontend(
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [supervisorFeedbackFiles, setSupervisorFeedbackFiles] = useState<AttachedFile[]>([]);
   const [activeAttachmentText, setActiveAttachmentText] = useState("");
+  const [supervisorHighlightedDocument, setSupervisorHighlightedDocument] = useState("");
   const [supervisorChangeLog, setSupervisorChangeLog] = useState("");
-  const [supervisorCanvasMode, setSupervisorCanvasMode] = useState<"document" | "changes">("document");
+  const [supervisorFeedbackSourceMode, setSupervisorFeedbackSourceMode] =
+    useState<SupervisorFeedbackSourceMode>("auto");
+  const [supervisorCanvasMode, setSupervisorCanvasMode] =
+    useState<SupervisorCanvasMode>("document");
 
   /**
    * AI Konzultant, Audit kvality a Obhajoba majú vlastné frontendové komponenty.
@@ -5003,6 +5128,7 @@ export default function AiSupervisorFrontend(
     setCanvasText("");
     setAttachedFiles([]);
     setSupervisorFeedbackFiles([]);
+    setSupervisorHighlightedDocument("");
     setSupervisorChangeLog("");
     setSupervisorCanvasMode("document");
     setActiveAttachmentText("");
@@ -5153,6 +5279,7 @@ export default function AiSupervisorFrontend(
     setResult("");
     setAttachedFiles([]);
     setSupervisorFeedbackFiles([]);
+    setSupervisorHighlightedDocument("");
     setSupervisorChangeLog("");
     setSupervisorCanvasMode("document");
     setActiveAttachmentText("");
@@ -5435,6 +5562,7 @@ export default function AiSupervisorFrontend(
     setCanvasText("");
     setAttachedFiles([]);
     setSupervisorFeedbackFiles([]);
+    setSupervisorHighlightedDocument("");
     setSupervisorChangeLog("");
     setSupervisorCanvasMode("document");
     setActiveAttachmentText("");
@@ -6066,6 +6194,7 @@ Text emailu:
     setBillingNotice(null);
 
     if (requestedModule === "supervisor") {
+      setSupervisorHighlightedDocument("");
       setSupervisorChangeLog("");
       setSupervisorCanvasMode("document");
     }
@@ -6886,10 +7015,16 @@ Text emailu:
         formData.append("studentText", userText);
         formData.append("supervisorFeedback", secondaryText);
         formData.append("editorMode", "feedback-revision");
-        formData.append("responseShape", "revisedDocument+changeLog");
+        formData.append(
+          "responseShape",
+          "revisedDocument+highlightedDocument+changeProtocol",
+        );
+        formData.append("feedbackSourceMode", supervisorFeedbackSourceMode);
+        formData.append("highlightChanges", "true");
+        formData.append("detailedChangeProtocol", "true");
         formData.append(
           "instruction",
-          "Zapracuj pripomienky do kompletnej práce bez sumarizácie. Vráť samostatne celý revidovaný dokument a protokol vykonaných zmien.",
+          "Zapracuj všetky pripomienky priamo do kompletnej práce bez sumarizácie. Vráť čistý revidovaný dokument, celý dokument so zvýraznenými zmenami a detailný protokol s presnou pripomienkou, pôvodným znením a novým znením.",
         );
       }
 
@@ -6987,6 +7122,9 @@ Text emailu:
           translationStyle,
           emailType,
           emailTone,
+          supervisorFeedbackSourceMode,
+          highlightChanges: requestedModule === "supervisor",
+          detailedChangeProtocol: requestedModule === "supervisor",
           translationFromLabel: getLanguageLabel(translationFrom),
           translationToLabel: getLanguageLabel(translationTo),
           translationStyleLabel: getTranslationStyleLabel(translationStyle),
@@ -7110,8 +7248,15 @@ Text emailu:
             : undefined,
         responseShape:
           requestedModule === "supervisor"
-            ? "revisedDocument+changeLog"
+            ? "revisedDocument+highlightedDocument+changeProtocol"
             : undefined,
+        feedbackSourceMode:
+          requestedModule === "supervisor"
+            ? supervisorFeedbackSourceMode
+            : undefined,
+        highlightChanges: requestedModule === "supervisor" ? true : undefined,
+        detailedChangeProtocol:
+          requestedModule === "supervisor" ? true : undefined,
         input: userText,
         studentText: requestedModule === "supervisor" ? userText : undefined,
         supervisorFeedback:
@@ -7200,6 +7345,9 @@ Text emailu:
           translationStyle,
           emailType,
           emailTone,
+          supervisorFeedbackSourceMode,
+          highlightChanges: requestedModule === "supervisor",
+          detailedChangeProtocol: requestedModule === "supervisor",
         },
       };
 
@@ -7329,8 +7477,25 @@ Text emailu:
         }
 
         if (requestedModule === "supervisor") {
+          setSupervisorHighlightedDocument(
+            cleanFinalOutput(
+              String(
+                data.highlightedDocument ||
+                  data.highlightedText ||
+                  data.revisedDocument ||
+                  "",
+              ),
+            ),
+          );
           setSupervisorChangeLog(
-            cleanFinalOutput(String(data.changeLog || data.changeProtocol || "")),
+            cleanFinalOutput(
+              String(
+                data.changeProtocol ||
+                  data.detailedChangeProtocol ||
+                  data.changeLog ||
+                  "",
+              ),
+            ),
           );
           setSupervisorCanvasMode("document");
         }
@@ -7663,8 +7828,18 @@ Text emailu:
   );
 
   const getCurrentExportText = () => {
-    if (activeModule === "supervisor" && supervisorCanvasMode === "changes") {
-      return supervisorChangeLog;
+    if (activeModule === "supervisor") {
+      if (supervisorCanvasMode === "changes") {
+        return supervisorChangeLog;
+      }
+
+      if (supervisorCanvasMode === "highlighted") {
+        return (
+          supervisorHighlightedDocument ||
+          canvasText ||
+          result
+        );
+      }
     }
 
     return stripModuleExtraSections(canvasText || result, activeModule);
@@ -7683,7 +7858,9 @@ Text emailu:
         ? "Prezentácia, sprievodný text a obhajoba"
         : activeModule === "supervisor" && supervisorCanvasMode === "changes"
           ? `${exportTitle || "ZEDPERA"} - protokol zmien`
-          : exportTitle || "ZEDPERA výstup";
+          : activeModule === "supervisor" && supervisorCanvasMode === "highlighted"
+            ? `${exportTitle || "ZEDPERA"} - zvýraznené zmeny`
+            : exportTitle || "ZEDPERA výstup";
 
     const html = createDocHtml(title, text);
 
@@ -7714,7 +7891,9 @@ Text emailu:
     const exportName =
       activeModule === "supervisor" && supervisorCanvasMode === "changes"
         ? `${exportTitle} - protokol zmien`
-        : exportTitle;
+        : activeModule === "supervisor" && supervisorCanvasMode === "highlighted"
+          ? `${exportTitle} - zvýraznené zmeny`
+          : exportTitle;
     const fileBase = sanitizeFileName(exportName);
     const html = createDocHtml(exportName, text);
 
@@ -9035,7 +9214,7 @@ Text emailu:
                     className="min-h-[220px] w-full resize-y rounded-2xl border border-white/10 bg-[#050916] px-4 py-4 text-sm font-semibold leading-6 text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-400/60 focus:ring-4 focus:ring-cyan-500/10"
                   />
                   <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">
-                    Môžete vložiť kapitolu priamo sem alebo nahrať celý pôvodný dokument vyššie. AI školiteľ nesmie dokument nahradiť skráteným súhrnom.
+                    Môžete vložiť kapitolu priamo sem alebo nahrať celý pôvodný dokument vyššie. Pripomienky môžu byť aj priamo v texte alebo vo Word komentároch; AI školiteľ ich zapracuje bez skrátenia práce.
                   </p>
                 </section>
 
@@ -9063,6 +9242,41 @@ Text emailu:
                   </p>
 
                   <div className="mt-4">
+                    <label
+                      htmlFor="supervisor-feedback-source-mode"
+                      className="mb-2 block text-xs font-black text-slate-200"
+                    >
+                      {supervisorEditorCopy.feedbackSourceLabel}
+                    </label>
+                    <select
+                      id="supervisor-feedback-source-mode"
+                      value={supervisorFeedbackSourceMode}
+                      onChange={(event) =>
+                        setSupervisorFeedbackSourceMode(
+                          event.target.value as SupervisorFeedbackSourceMode,
+                        )
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-[#050916] px-4 py-3 text-sm font-bold text-white outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
+                    >
+                      {(
+                        [
+                          "auto",
+                          "separate",
+                          "embedded",
+                          "both",
+                        ] as SupervisorFeedbackSourceMode[]
+                      ).map((mode) => (
+                        <option key={mode} value={mode} className="bg-[#050916]">
+                          {supervisorEditorCopy.feedbackSourceOptions[mode]}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
+                      {supervisorEditorCopy.feedbackSourceHelp}
+                    </p>
+                  </div>
+
+                  <div className="mt-4">
                     <FileUploadBox
                       files={supervisorFeedbackFiles}
                       fileInputRef={supervisorFeedbackFileInputRef}
@@ -9076,7 +9290,7 @@ Text emailu:
                         attachedFiles.length + supervisorFeedbackFiles.length >= activeUploadLimit
                       }
                       title="Pripomienky v dokumente"
-                      description="Voliteľne nahrajte PDF/DOCX/TXT s pripomienkami školiteľa, oponenta alebo konzultanta."
+                      description="Nahrajte samostatný PDF/DOCX/TXT s pripomienkami. Ak sú komentáre priamo v pôvodnom DOCX, systém ich načíta automaticky."
                       buttonLabel="Priložiť pripomienky"
                     />
                   </div>
@@ -9444,6 +9658,20 @@ uroven_sportu`}
               {activeModule === "supervisor" ? "Revidovaný dokument" : "Canvas"}
             </button>
 
+            {activeModule === "supervisor" && supervisorHighlightedDocument ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSupervisorCanvasMode("highlighted");
+                  setCanvasOpen(true);
+                }}
+                className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-sm font-black text-amber-100 transition hover:bg-amber-300/20 sm:mr-3 sm:w-auto"
+              >
+                <Paintbrush className="h-4 w-4" />
+                {supervisorEditorCopy.highlightedResultLabel}
+              </button>
+            ) : null}
+
             {activeModule === "supervisor" && supervisorChangeLog ? (
               <button
                 type="button"
@@ -9454,7 +9682,7 @@ uroven_sportu`}
                 className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-500/20 sm:mr-3 sm:w-auto"
               >
                 <FileText className="h-4 w-4" />
-                Protokol zmien
+                {supervisorEditorCopy.protocolResultLabel}
               </button>
             ) : null}
 
@@ -9511,15 +9739,19 @@ uroven_sportu`}
                 <h2 className="text-lg font-black text-white">
                   {activeModule === "supervisor"
                     ? supervisorCanvasMode === "changes"
-                      ? "Protokol vykonaných zmien"
-                      : "Kompletný revidovaný dokument"
+                      ? supervisorEditorCopy.protocolResultLabel
+                      : supervisorCanvasMode === "highlighted"
+                        ? supervisorEditorCopy.highlightedResultLabel
+                        : "Kompletný revidovaný dokument"
                     : "Canvas"}
                 </h2>
                 <p className="text-sm font-semibold text-slate-400">
                   {activeModule === "supervisor"
                     ? supervisorCanvasMode === "changes"
-                      ? "Bod po bode: čo bolo v dokumente upravené a prečo."
-                      : "Celý dokument po zapracovaní pripomienok, bez sumarizácie pôvodnej práce."
+                      ? "Presná pripomienka, miesto zmeny, pôvodné znenie a nové znenie po zapracovaní."
+                      : supervisorCanvasMode === "highlighted"
+                        ? "Celý dokument po revízii; nový alebo nahradený text je zvýraznený žltou farbou."
+                        : "Čistý celý dokument po zapracovaní pripomienok, bez technických značiek."
                     : "Upravte alebo skopírujte výsledný text."}
                 </p>
               </div>
@@ -9537,6 +9769,19 @@ uroven_sportu`}
                     ].join(" ")}
                   >
                     Dokument
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSupervisorCanvasMode("highlighted")}
+                    disabled={!supervisorHighlightedDocument}
+                    className={[
+                      "rounded-xl px-3 py-2 text-xs font-black transition disabled:opacity-40",
+                      supervisorCanvasMode === "highlighted"
+                        ? "bg-amber-500 text-slate-950"
+                        : "border border-white/10 bg-white/[0.06] text-slate-300",
+                    ].join(" ")}
+                  >
+                    Zvýraznené zmeny
                   </button>
                   <button
                     type="button"
@@ -9564,21 +9809,36 @@ uroven_sportu`}
               </button>
             </div>
 
-            <textarea
-              value={
-                activeModule === "supervisor" && supervisorCanvasMode === "changes"
-                  ? supervisorChangeLog
-                  : canvasText
-              }
-              onChange={(event) => {
-                if (activeModule === "supervisor" && supervisorCanvasMode === "changes") {
-                  setSupervisorChangeLog(event.target.value);
-                } else {
-                  setCanvasText(event.target.value);
+            {activeModule === "supervisor" &&
+            supervisorCanvasMode === "highlighted" ? (
+              <div
+                className="min-h-0 flex-1 overflow-y-auto bg-white p-6 text-sm font-semibold leading-7 text-slate-900"
+                dangerouslySetInnerHTML={{
+                  __html: createHighlightedBodyHtml(
+                    supervisorHighlightedDocument || canvasText,
+                  ),
+                }}
+              />
+            ) : (
+              <textarea
+                value={
+                  activeModule === "supervisor" && supervisorCanvasMode === "changes"
+                    ? supervisorChangeLog
+                    : canvasText
                 }
-              }}
-              className="min-h-0 flex-1 resize-none border-0 bg-[#050814] p-6 text-sm font-semibold leading-7 text-white outline-none"
-            />
+                onChange={(event) => {
+                  if (
+                    activeModule === "supervisor" &&
+                    supervisorCanvasMode === "changes"
+                  ) {
+                    setSupervisorChangeLog(event.target.value);
+                  } else {
+                    setCanvasText(event.target.value);
+                  }
+                }}
+                className="min-h-0 flex-1 resize-none border-0 bg-[#050814] p-6 text-sm font-semibold leading-7 text-white outline-none"
+              />
+            )}
 
             <div className="flex flex-wrap items-center justify-end gap-3 border-t border-white/10 px-6 py-4">
               <button
@@ -9587,7 +9847,12 @@ uroven_sportu`}
                   navigator.clipboard.writeText(
                     activeModule === "supervisor" && supervisorCanvasMode === "changes"
                       ? supervisorChangeLog
-                      : canvasText || "",
+                      : activeModule === "supervisor" &&
+                          supervisorCanvasMode === "highlighted"
+                        ? stripChangeMarkers(
+                            supervisorHighlightedDocument || canvasText || "",
+                          )
+                        : canvasText || "",
                   );
                 }}
                 className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"

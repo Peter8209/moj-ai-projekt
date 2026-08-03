@@ -48,6 +48,23 @@ export type SendOrderConfirmationEmailResult = {
 
 type EmailLanguage = "sk" | "cs" | "en" | "de" | "pl" | "hu";
 
+type LocaleResolutionSource =
+  | "input.locale"
+  | "session.metadata"
+  | "payment_intent.metadata"
+  | "subscription.metadata"
+  | "customer.metadata"
+  | "session.locale"
+  | "session.url"
+  | "environment"
+  | "fallback";
+
+type ResolvedLocale = {
+  locale: string;
+  language: EmailLanguage;
+  source: LocaleResolutionSource;
+};
+
 type EmailStep = {
   title: string;
   text: string;
@@ -269,21 +286,47 @@ const EMAIL_COPY: Record<EmailLanguage, OrderEmailCopy> = {
   },
 };
 
-function getEmailLanguage(locale: string): EmailLanguage {
-  const normalized = locale.toLowerCase();
-
-  if (normalized.startsWith("cs")) return "cs";
-  if (normalized.startsWith("en")) return "en";
-  if (normalized.startsWith("de")) return "de";
-  if (normalized.startsWith("pl")) return "pl";
-  if (normalized.startsWith("hu")) return "hu";
-  return "sk";
-}
-
 const DEFAULT_LOCALE = "sk-SK";
 const DEFAULT_CURRENCY = "eur";
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 const EMAIL_TIMEOUT_MS = 20_000;
+
+const LANGUAGE_TO_LOCALE: Record<EmailLanguage, string> = {
+  sk: "sk-SK",
+  cs: "cs-CZ",
+  en: "en-GB",
+  de: "de-DE",
+  pl: "pl-PL",
+  hu: "hu-HU",
+};
+
+const LANGUAGE_ALIASES: Record<string, EmailLanguage> = {
+  sk: "sk",
+  slk: "sk",
+  cs: "cs",
+  cz: "cs",
+  ces: "cs",
+  en: "en",
+  eng: "en",
+  de: "de",
+  deu: "de",
+  ger: "de",
+  pl: "pl",
+  pol: "pl",
+  hu: "hu",
+  hun: "hu",
+};
+
+const LOCALE_METADATA_KEYS = [
+  "locale",
+  "language",
+  "lang",
+  "app_locale",
+  "app_language",
+  "ui_locale",
+  "selected_locale",
+  "selected_language",
+] as const;
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -295,16 +338,71 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
-function getAppUrl(): string {
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    process.env.NEXT_PUBLIC_BASE_URL?.trim();
+function addHttpsProtocol(value: string): string {
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
 
-  if (!appUrl) {
-    throw new Error("Chýba NEXT_PUBLIC_APP_URL alebo NEXT_PUBLIC_BASE_URL.");
+function normalizeAppUrl(value: string): string | null {
+  const candidate = addHttpsProtocol(value.trim()).replace(/\/+$/, "");
+
+  try {
+    const url = new URL(candidate);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function isLocalhostUrl(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function getAppUrl(): string {
+  const isVercel = process.env.VERCEL === "1";
+  const candidates = [
+    process.env.APP_URL,
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXT_PUBLIC_BASE_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    process.env.VERCEL_URL,
+  ];
+
+  for (const rawValue of candidates) {
+    if (!rawValue?.trim()) {
+      continue;
+    }
+
+    const appUrl = normalizeAppUrl(rawValue);
+
+    if (!appUrl) {
+      continue;
+    }
+
+    // Vo Verceli nikdy neposielame používateľovi localhost odkaz, aj keby tam
+    // omylom zostala lokálna environment premenná.
+    if (isVercel && isLocalhostUrl(appUrl)) {
+      continue;
+    }
+
+    return appUrl;
   }
 
-  return appUrl.replace(/\/+$/, "");
+  throw new Error(
+    "Chýba platná URL aplikácie. Vo Verceli nastav APP_URL alebo " +
+      "NEXT_PUBLIC_SITE_URL; podporované sú aj NEXT_PUBLIC_APP_URL, " +
+      "NEXT_PUBLIC_BASE_URL, VERCEL_PROJECT_PRODUCTION_URL a VERCEL_URL.",
+  );
 }
 
 function escapeHtml(value: string): string {
@@ -316,29 +414,155 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#039;");
 }
 
-function normalizeLocale(value: string | null | undefined): string {
+function parseEmailLanguage(
+  value: string | null | undefined,
+): EmailLanguage | null {
   const normalized = String(value || "")
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .replaceAll("_", "-");
 
-  const localeMap: Record<string, string> = {
-    sk: "sk-SK",
-    "sk-sk": "sk-SK",
-    cs: "cs-CZ",
-    cz: "cs-CZ",
-    "cs-cz": "cs-CZ",
-    en: "en-GB",
-    "en-gb": "en-GB",
-    "en-us": "en-US",
-    de: "de-DE",
-    "de-de": "de-DE",
-    pl: "pl-PL",
-    "pl-pl": "pl-PL",
-    hu: "hu-HU",
-    "hu-hu": "hu-HU",
+  if (!normalized || normalized === "auto" || normalized === "null") {
+    return null;
+  }
+
+  const directAlias = LANGUAGE_ALIASES[normalized];
+
+  if (directAlias) {
+    return directAlias;
+  }
+
+  const primaryLanguage = normalized.split("-")[0];
+  return LANGUAGE_ALIASES[primaryLanguage] || null;
+}
+
+function normalizeLocale(value: string | null | undefined): string {
+  const language = parseEmailLanguage(value);
+  return language ? LANGUAGE_TO_LOCALE[language] : DEFAULT_LOCALE;
+}
+
+function getMetadataLocale(
+  metadata: Stripe.Metadata | null | undefined,
+): string | null {
+  if (!metadata) {
+    return null;
+  }
+
+  for (const key of LOCALE_METADATA_KEYS) {
+    const value = metadata[key];
+
+    if (parseEmailLanguage(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function getObjectMetadata(value: unknown): Stripe.Metadata | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const metadata = (value as { metadata?: unknown }).metadata;
+
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  return metadata as Stripe.Metadata;
+}
+
+function getLocaleFromUrl(value: string | null | undefined): string | null {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+
+    for (const key of ["lang", "locale", "language"]) {
+      const candidate = url.searchParams.get(key);
+
+      if (parseEmailLanguage(candidate)) {
+        return candidate;
+      }
+    }
+
+    const hostnameLanguage = url.hostname.split(".")[0];
+
+    if (parseEmailLanguage(hostnameLanguage)) {
+      return hostnameLanguage;
+    }
+
+    for (const segment of url.pathname.split("/").filter(Boolean)) {
+      if (parseEmailLanguage(segment)) {
+        return segment;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function resolveEmailLocale(
+  session: Stripe.Checkout.Session,
+  explicitLocale: string | null | undefined,
+): ResolvedLocale {
+  const expandedCustomer = getExpandedCustomer(session);
+  const sessionWithReturnUrl = session as Stripe.Checkout.Session & {
+    return_url?: string | null;
   };
 
-  return localeMap[normalized] || DEFAULT_LOCALE;
+  const candidates: Array<{
+    value: string | null | undefined;
+    source: LocaleResolutionSource;
+  }> = [
+    { value: explicitLocale, source: "input.locale" },
+    { value: getMetadataLocale(session.metadata), source: "session.metadata" },
+    {
+      value: getMetadataLocale(getObjectMetadata(session.payment_intent)),
+      source: "payment_intent.metadata",
+    },
+    {
+      value: getMetadataLocale(getObjectMetadata(session.subscription)),
+      source: "subscription.metadata",
+    },
+    {
+      value: getMetadataLocale(expandedCustomer?.metadata),
+      source: "customer.metadata",
+    },
+    { value: session.locale, source: "session.locale" },
+    { value: getLocaleFromUrl(session.success_url), source: "session.url" },
+    { value: getLocaleFromUrl(session.cancel_url), source: "session.url" },
+    { value: getLocaleFromUrl(sessionWithReturnUrl.return_url), source: "session.url" },
+    {
+      value:
+        process.env.DEFAULT_EMAIL_LOCALE ||
+        process.env.NEXT_PUBLIC_DEFAULT_LOCALE,
+      source: "environment",
+    },
+  ];
+
+  for (const candidate of candidates) {
+    const language = parseEmailLanguage(candidate.value);
+
+    if (language) {
+      return {
+        locale: normalizeLocale(candidate.value),
+        language,
+        source: candidate.source,
+      };
+    }
+  }
+
+  return {
+    locale: DEFAULT_LOCALE,
+    language: "sk",
+    source: "fallback",
+  };
 }
 
 function normalizeCurrency(value: string | null | undefined): string {
@@ -370,6 +594,20 @@ function formatMoney(
 
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function getLogoUrl(appUrl: string): string {
+  const configuredLogoUrl = process.env.EMAIL_LOGO_URL?.trim();
+
+  if (!configuredLogoUrl) {
+    return `${appUrl}/email/zedpera-logo.png`;
+  }
+
+  try {
+    return new URL(configuredLogoUrl, `${appUrl}/`).toString();
+  } catch {
+    return `${appUrl}/email/zedpera-logo.png`;
+  }
 }
 
 function getExpandedCustomer(
@@ -1040,8 +1278,7 @@ export async function sendOrderConfirmationEmail(
   const resendApiKey = getRequiredEnv("RESEND_API_KEY");
   const emailFrom = getRequiredEnv("EMAIL_FROM");
   const appUrl = getAppUrl();
-  const logoUrl =
-    process.env.EMAIL_LOGO_URL?.trim() || `${appUrl}/email/zedpera-logo.png`;
+  const logoUrl = getLogoUrl(appUrl);
   const replyTo = process.env.EMAIL_REPLY_TO?.trim();
   const orderNotificationEmail =
     process.env.ORDER_NOTIFICATION_EMAIL?.trim().toLowerCase();
@@ -1056,11 +1293,20 @@ export async function sendOrderConfirmationEmail(
     );
   }
 
-  const locale = normalizeLocale(input.locale);
-  const language = getEmailLanguage(locale);
+  const resolvedLocale = resolveEmailLocale(input.session, input.locale);
+  const { locale, language } = resolvedLocale;
   const copy = EMAIL_COPY[language];
   const customerName = getCustomerName(input.session);
-  const loginUrl = `${appUrl}/login?lang=${encodeURIComponent(language)}`;
+  const loginUrl = new URL("/login", `${appUrl}/`);
+  loginUrl.searchParams.set("lang", language);
+
+  console.info("[order-confirmation] E-mail locale resolved", {
+    sessionId: input.session.id,
+    locale,
+    language,
+    source: resolvedLocale.source,
+    vercelEnvironment: process.env.VERCEL_ENV || null,
+  });
   const orderLines = getOrderLines(
     input.session,
     input.planId,
@@ -1087,7 +1333,7 @@ export async function sendOrderConfirmationEmail(
   const html = createHtmlEmail({
     customerName,
     logoUrl,
-    loginUrl,
+    loginUrl: loginUrl.toString(),
     orderSummaryHtml,
     appUrl,
     language,
@@ -1096,7 +1342,7 @@ export async function sendOrderConfirmationEmail(
 
   const text = createPlainTextEmail({
     customerName,
-    loginUrl,
+    loginUrl: loginUrl.toString(),
     orderSummary: orderSummaryText,
     copy,
   });
@@ -1111,7 +1357,7 @@ export async function sendOrderConfirmationEmail(
     headers: {
       Authorization: `Bearer ${resendApiKey}`,
       "Content-Type": "application/json",
-      "Idempotency-Key": `zedpera-order-${input.session.id}`,
+      "Idempotency-Key": `zedpera-order-${input.session.id}-${language}`,
     },
     body: JSON.stringify({
       from: emailFrom,
@@ -1129,6 +1375,10 @@ export async function sendOrderConfirmationEmail(
         {
           name: "language",
           value: language,
+        },
+        {
+          name: "locale_source",
+          value: resolvedLocale.source.replaceAll(".", "_"),
         },
         {
           name: "stripe_mode",
